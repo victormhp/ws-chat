@@ -32,7 +32,7 @@ func main() {
 	mux.Handle("GET /static/", http.StripPrefix("/static", fileServer))
 
 	mux.HandleFunc("GET /", serveHome)
-	mux.HandleFunc("GET /ws", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /ws/", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(hub, w, r)
 	})
 

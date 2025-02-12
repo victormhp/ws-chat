@@ -27,6 +27,7 @@ var upgrader = websocket.Upgrader{
 }
 
 type Client struct {
+	user string
 	hub  *Hub
 	conn *websocket.Conn
 	send chan []byte
@@ -60,9 +61,6 @@ func (c *Client) readPump() {
 		}
 
 		msg = bytes.TrimSpace(bytes.Replace(msg, newline, space, -1))
-		if string(msg) == "/quit" {
-			break
-		}
 		c.hub.broadcast <- msg
 	}
 }
@@ -76,7 +74,7 @@ func (c *Client) writePump() {
 
 	for {
 		select {
-		case message, ok := <-c.send:
+		case rawMsg, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
@@ -87,17 +85,12 @@ func (c *Client) writePump() {
 			if err != nil {
 				return
 			}
-			w.Write(message)
 
-			n := len(c.send)
-			for i := 0; i < n; i++ {
-				w.Write(newline)
-				w.Write(<-c.send)
-			}
-
+			w.Write(rawMsg)
 			if err := w.Close(); err != nil {
 				return
 			}
+
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
@@ -110,12 +103,20 @@ func (c *Client) writePump() {
 }
 
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
+	user := r.URL.Query().Get("username")
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256), done: make(chan bool)}
+
+	client := &Client{
+		user: user,
+		hub:  hub,
+		conn: conn,
+		send: make(chan []byte, 256),
+		done: make(chan bool),
+	}
 	client.hub.register <- client
 
 	go client.writePump()

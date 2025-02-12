@@ -14,9 +14,32 @@ type Hub struct {
 func newHub() *Hub {
 	return &Hub{
 		clients:    make(map[*Client]bool),
-		broadcast:  make(chan []byte),
+		broadcast:  make(chan []byte, 1024),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+	}
+}
+
+func (h *Hub) getUserList() []string {
+	var users []string
+	for c := range h.clients {
+		users = append(users, c.user)
+	}
+	return users
+}
+
+func (h *Hub) broadcastUserList() {
+	users := h.getUserList()
+	usersList, err := newUsersList(users)
+	if err != nil {
+		log.Println("Error creating user list message:", err)
+		return
+	}
+
+	select {
+	case h.broadcast <- usersList:
+	default:
+		log.Println("Broadcast channel is full, user list not sent")
 	}
 }
 
@@ -24,22 +47,25 @@ func (h *Hub) run() {
 	for {
 		select {
 		case msg := <-h.broadcast:
-			for client := range h.clients {
+			for c := range h.clients {
 				select {
-				case client.send <- msg:
+				case c.send <- msg:
 				default:
-					delete(h.clients, client)
-					close(client.send)
+					log.Printf("Client %s disconnecting", c.user)
+					delete(h.clients, c)
+					close(c.send)
 				}
 			}
 		case client := <-h.register:
-			log.Printf("%s has entered the chat\n", client.conn.RemoteAddr())
+			log.Printf("%s has entered the chat\n", client.user)
 			h.clients[client] = true
+			h.broadcastUserList()
 		case client := <-h.unregister:
-			log.Printf("%s has exited the chat\n", client.conn.RemoteAddr())
+			log.Printf("%s has exited the chat\n", client.user)
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
 				close(client.send)
+				h.broadcastUserList()
 			}
 		}
 	}
